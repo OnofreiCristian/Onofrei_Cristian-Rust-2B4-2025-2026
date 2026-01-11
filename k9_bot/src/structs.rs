@@ -10,8 +10,8 @@ use serde::{Deserialize,Serialize};
 pub struct Quote {
 
     pub text: String,
-    pub Doctor: String,
-    pub Source: Option<String>,
+    pub doctor: String,
+    pub source: Option<String>,
 
 }
 

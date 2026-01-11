@@ -61,8 +61,8 @@ pub async fn quote(ctx: Context<'_>) -> Result<(),Error>
 
             "\"{}\" \n- **{}**{}",
             quote.text,
-            quote.Doctor,
-            quote.Source.as_ref().map(|s| format!(" ({})", s)).unwrap_or_default() 
+            quote.doctor,
+            quote.source.as_ref().map(|s| format!(" ({})", s)).unwrap_or_default() 
             //as_ref = as reference, map creates paranthases if source exists, unwrap returns an empty string if theres no source
         );
 
@@ -82,6 +82,54 @@ pub async fn quote(ctx: Context<'_>) -> Result<(),Error>
 
 }
 
+#[poise::command(prefix_command)]
+pub async fn doctor(
+
+    ctx: Context<'_>,
+    #[description = "Which Doctor do you want to see?"]
+    number: u32, //argument
+
+
+) -> Result<(),Error>{
+
+
+    let filename = format!("images/{}.jpg", number); //construit numele fisierului
+
+
+    //this checks if the file exists in the first place
+    if !std::path::Path::new(&filename).exists() {
+
+        ctx.say(format!("I couldn't find an image of Doctor #{} in the archives.",number)).await?;
+
+        return Ok(());
+    }
+
+    let attachment = serenity::CreateAttachment::path(&filename).await;
+
+
+    //sending message if we found file or error otherwise
+    match attachment {
+
+        Ok(file) => {
+
+            ctx.send(poise::CreateReply::default().attachment(file)).await?;
+
+        },
+
+        Err(e) => {
+
+            println!("Error loading file {}", e);
+
+            ctx.say("Error: File load error!").await?;
+
+        }
+
+    }
+
+
+    Ok(())
+
+}
 
 #[tokio::main] //this is here to tel the main function to be able to be ran by multiple users asycronioushljtrlt
 async fn main() -> Result<(), Error> {
@@ -102,7 +150,7 @@ async fn main() -> Result<(), Error> {
     
     //configuration options
     .options(poise::FrameworkOptions {
-        commands: vec![ping(), quote()], //register the ping command
+        commands: vec![ping(), quote(), doctor()], //register the ping command
         prefix_options: poise::PrefixFrameworkOptions{
             prefix: Some("!".into()), //prefix is !
             ..Default::default()
