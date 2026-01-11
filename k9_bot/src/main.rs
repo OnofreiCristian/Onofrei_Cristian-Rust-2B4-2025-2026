@@ -2,7 +2,8 @@ mod structs;
 
 use poise::serenity_prelude as serenity; //this is used to access permissions and users / channels
 use poise::Framework; // main builder
-use poise::FrameworkOptions; use sqlx::Sqlite;
+use poise::FrameworkOptions; use rand::random;
+use sqlx::Sqlite;
 // command prefix and registering commands
 use sqlx::SqlitePool; //used to access database
 use std::fs; //to read JSON files
@@ -12,6 +13,9 @@ use dotenv::dotenv; // to load the .env file
 
 use structs::{Data,Quote,Episode};
 
+//using this to choose random quotes
+use rand::rng;
+use rand::prelude::IndexedRandom;
 
 
 // User data, which is stored and accessible in all command invocations
@@ -35,6 +39,49 @@ async fn ping(ctx: Context <'_>) -> Result<(),Error>{
 }
 
 
+#[poise::command(prefix_command)]
+pub async fn quote(ctx: Context<'_>) -> Result<(),Error>
+{
+
+    let data = ctx.data(); //my data is the vector of quotes, so we are accessing them directly
+
+    
+    //opening new sope so rng is created and accessed
+    //if not, .await would freak out
+    let random_quote = {
+        let mut r = rng(); //choosing a temporary random number
+        data.quotes.choose(&mut r).cloned() //choosing a random quite using the random number,
+    };
+
+
+
+    if let Some(quote) = random_quote 
+    {
+        let response = format!(
+
+            "\"{}\" \n- **{}**{}",
+            quote.text,
+            quote.Doctor,
+            quote.Source.as_ref().map(|s| format!(" ({})", s)).unwrap_or_default() 
+            //as_ref = as reference, map creates paranthases if source exists, unwrap returns an empty string if theres no source
+        );
+
+
+        //formated the response
+
+        ctx.say(response).await?;
+        
+
+    }
+    else {
+        ctx.say("Sorry, Couldn't find any quotes.").await?;
+    }
+
+
+    Ok(())
+
+}
+
 
 #[tokio::main] //this is here to tel the main function to be able to be ran by multiple users asycronioushljtrlt
 async fn main() -> Result<(), Error> {
@@ -55,7 +102,7 @@ async fn main() -> Result<(), Error> {
     
     //configuration options
     .options(poise::FrameworkOptions {
-        commands: vec![ping()], //register the ping command
+        commands: vec![ping(), quote()], //register the ping command
         prefix_options: poise::PrefixFrameworkOptions{
             prefix: Some("!".into()), //prefix is !
             ..Default::default()
@@ -101,11 +148,11 @@ async fn main() -> Result<(), Error> {
     //creating client and running the bot
 
     let intents = serenity::GatewayIntents::non_privileged()
-    | serenity::GatewayIntents::MESSAGE_CONTENT;
+    | serenity::GatewayIntents::MESSAGE_CONTENT; //permissions
 
     let client = serenity::ClientBuilder::new(token,intents).framework(framework).await;
 
-    client.unwrap().start().await.unwrap();
+    client.unwrap().start().await.unwrap(); //infinite loop so the bot stays alive
     
 
     Ok(())
