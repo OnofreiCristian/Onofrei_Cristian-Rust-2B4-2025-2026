@@ -1,10 +1,9 @@
 mod structs;
 
 use poise::serenity_prelude as serenity; //this is used to access permissions and users / channels
-use poise::Framework; // main builder
-use poise::FrameworkOptions; use rand::random;
-use sqlx::Sqlite;
-// command prefix and registering commands
+
+
+use sqlx::Sqlite; //database
 use sqlx::SqlitePool; //used to access database
 use std::fs; //to read JSON files
 use std::env; //to read enviroment files
@@ -16,6 +15,8 @@ use structs::{Data,Quote,Episode};
 //using this to choose random quotes
 use rand::rng;
 use rand::prelude::IndexedRandom;
+
+use crate::structs::TriviaQuestions;
 
 
 // User data, which is stored and accessible in all command invocations
@@ -131,6 +132,111 @@ pub async fn doctor(
 
 }
 
+
+#[poise::command(prefix_command)]
+pub async fn episode(
+
+    ctx: Context <'_>,
+    #[description = "The name of the episode"]
+    #[rest] //captures the entire message as one string
+    query: String
+    
+) -> Result<(), Error> {
+
+    let data = ctx.data();
+
+    //searching for the episode 
+    //we make both strings lowercase - Blink = blink
+
+    let episode = data.episodes.iter().find(|e|
+        
+        e.name.to_lowercase().contains(&query.to_lowercase())
+
+    );
+
+
+    //handling the result
+
+    match episode {
+
+        Some(ep) => {
+
+                let embed = serenity::CreateEmbed::new()
+                .title(&ep.name)
+                .description(&ep.summary)
+                //picking color
+                .color(0x003b6f)
+                .field("Season", ep.season.to_string(), true) //true = inline
+                .field("Episode", ep.number.to_string(), true)
+                .field("Runtime", ep.runtime.to_string(), true);
+
+            //send the message with the embed
+            //we use create reply to wrap the embed
+
+            ctx.send(poise::CreateReply::default().embed(embed)).await?;
+
+        },
+
+        None => {
+
+            ctx.say(format!("Couldn't find any episode matching \"{}\".", query)).await?;
+
+        }
+
+    }
+
+
+    Ok(())
+}
+
+#[poise::command(prefix_command, slash_command)]
+pub async fn points(ctx: Context<'_>) -> Result<(), Error> {
+
+
+    let data = ctx.data();
+
+    //accessing the database;
+
+    let rows = sqlx::query!(
+
+        "SELECT user_id, points FROM users ORDER BY points DESC LIMIT 10"
+
+    )
+
+    .fetch_all(&data.database)
+    .await?;
+
+
+    //formatting the leaderboard on discord
+
+    let mut response = String::from("** Time Lord Leaderboard **\n");
+
+
+    if rows.is_empty() {
+
+        response.push_str("No points awarded yet. Be the first!");
+    }
+    else {
+
+        for(i, row) in rows.iter().enumerate() {
+
+            //use <@user_id> so discord automatically highlights name
+
+            let user_id = row.user_id.clone().unwrap_or_default();
+            let score = row.points.unwrap_or(0);
+
+
+            response.push_str(&format!("{}. <@{}> - **{}** points\n",i+1,user_id,score));
+        }
+
+    }
+
+    ctx.say(response).await?;
+
+    Ok(())
+}
+
+
 #[tokio::main] //this is here to tel the main function to be able to be ran by multiple users asycronioushljtrlt
 async fn main() -> Result<(), Error> {
 
@@ -150,7 +256,7 @@ async fn main() -> Result<(), Error> {
     
     //configuration options
     .options(poise::FrameworkOptions {
-        commands: vec![ping(), quote(), doctor()], //register the ping command
+        commands: vec![ping(), quote(), doctor(), episode(), points()], //register the ping command
         prefix_options: poise::PrefixFrameworkOptions{
             prefix: Some("!".into()), //prefix is !
             ..Default::default()
@@ -172,6 +278,14 @@ async fn main() -> Result<(), Error> {
             let episodes_data = fs::read_to_string("episodes.json").unwrap_or("[]".to_string());
             let episodes: Vec<Episode> = serde_json::from_str(&episodes_data).expect("Error parsing episodes.json");
 
+
+            //load trivia from file
+            let trivia_data = fs::read_to_string("trivia.json").unwrap_or("[]".to_string());
+            let trivia_questions: Vec<TriviaQuestions> = serde_json::from_str(&trivia_data).expect("Error parsin trivia.json file.");
+
+            println!("Loaded {} trivia questions", trivia_questions.len());
+
+
             //creating Data Struct
 
             Ok( Data {
@@ -179,7 +293,7 @@ async fn main() -> Result<(), Error> {
                 database: db_pool,
                 quotes,
                 episodes,
-                trivia_questions: vec![],
+                trivia_questions,
                 current_trivia: Mutex::new(None),
 
 

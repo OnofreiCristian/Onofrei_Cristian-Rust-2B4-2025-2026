@@ -1,4 +1,4 @@
-use std::string;
+
 use sqlx::SqlitePool;
 use std::sync::Mutex; //Safe access across multiple threads
 
@@ -19,21 +19,20 @@ pub struct Quote {
 #[derive(Debug, Deserialize, Clone)]
 pub struct Episode {
 
-    pub title: String,
-    pub runtime: String,
+    pub name: String,
+    pub runtime: u32,
     pub season: u32,
-    pub episode_number: u32,
-    pub description: String,
+    pub number: u32,
+    pub summary: String,
 
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 
 pub struct TriviaQuestions{
 
     pub question: String,
     pub answer: String,
-    pub category: String,
 
 
 }
