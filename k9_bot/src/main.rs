@@ -3,12 +3,14 @@ mod structs;
 use poise::serenity_prelude as serenity; //this is used to access permissions and users / channels
 
 
-use sqlx::Sqlite; //database
-use sqlx::SqlitePool; //used to access database
+
+use sqlx::SqlitePool; //database
+//used to access database
 use std::fs; //to read JSON files
 use std::env; //to read enviroment files
 use std::sync::Mutex; // to share trivia state
 use dotenv::dotenv; // to load the .env file
+use std::sync::Arc;
 
 use structs::{Data,Quote,Episode};
 
@@ -189,7 +191,7 @@ pub async fn episode(
     Ok(())
 }
 
-#[poise::command(prefix_command, slash_command)]
+#[poise::command(prefix_command)]
 pub async fn points(ctx: Context<'_>) -> Result<(), Error> {
 
 
@@ -237,6 +239,189 @@ pub async fn points(ctx: Context<'_>) -> Result<(), Error> {
 }
 
 
+#[poise::command(prefix_command)]
+pub async fn ask(ctx: Context<'_>) -> Result<(),Error> {
+
+    let data = ctx.data();
+
+    //picking a random question
+
+    let question_opt = {
+
+        let mut rng = rand::rng();
+        data.trivia_questions.choose(&mut rng).cloned()
+    };
+
+    if let Some(q) = question_opt {
+
+        //setting the q as the active question
+
+        {
+
+        let mut state = data.current_trivia.lock().unwrap();
+
+        *state = Some(q.clone());
+
+        }
+
+        ctx.say(format!("** Trivia Time!** \n**{}**", q.question)).await?;
+
+    } 
+    else {
+        ctx.say("No trivia question loaded!").await?;
+    }
+
+    Ok(())
+
+
+} 
+
+async fn event_handler(
+
+    ctx: &serenity::Context,
+    event: &serenity::FullEvent,
+    _framework: poise::FrameworkContext<'_,Data,Error>,
+    data: &Data,
+
+
+) -> Result<(), Error>
+{
+
+    if let serenity::FullEvent::Message { new_message } = event {
+
+
+        //ignore bots
+        if new_message.author.bot {
+            return Ok(());
+        }
+
+
+        //check if theres an active trivia question 
+        //using a scope { } to lock, check, and potentially clear the question automatically
+        //this prevents two people from answering correctly at the exact same millisecond 
+
+        let correct_answer_found = {
+
+            let mut trivia_state = data.current_trivia.lock().unwrap();
+
+            if let Some(active_question) = &*trivia_state {
+
+                //check if the users message matches the answer
+
+                if new_message.content.trim().to_lowercase() == active_question.answer.trim().to_lowercase() {
+
+                    *trivia_state = None;
+                    true
+
+                }
+
+                else {
+
+                    false
+                }
+            }
+
+            else {
+
+                false
+
+            }
+
+        };
+
+            if correct_answer_found {
+        
+        let user_id = new_message.author.id.to_string();
+        let username = &new_message.author.name;
+
+        sqlx::query!(
+
+            "INSERT INTO users (user_id, points) VALUES (?, 1)
+             ON CONFLICT(user_id) DO UPDATE SET points = points + 1",
+             user_id
+        ).execute(&data.database).await?;
+
+        let response = format!("**Correct!** {} gets a point!", username);
+
+        new_message.channel_id.say(&ctx.http,response).await?;
+
+
+     }
+    }
+
+
+    //awarding points to winner
+
+
+    Ok(())
+
+
+}
+
+async fn start_trivia_loop(
+
+    http: Arc<serenity::Http>, //the tool to send messages
+    questions: Arc<Vec<structs::TriviaQuestions>>, //the list of questions
+    state: Arc<Mutex<Option<structs::TriviaQuestions>>>, // the active question to lock
+
+
+) {
+
+    let channel_id = serenity::ChannelId::new(977191248358150174);
+
+    loop {
+
+        //waiting for interval (30 seconds for testing)
+
+        tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+
+
+        //check the state
+        let is_game_active = {
+
+            let lock = state.lock().unwrap();
+            lock.is_some()
+
+        };
+
+        //post new question if needed
+
+        if is_game_active{
+
+            continue;
+        }
+
+            //pick a random question
+
+            let new_question = {
+
+                let mut rng =rand::rng();
+
+                questions.choose(&mut rng).cloned()
+
+            };
+
+            if let Some(q) = new_question {
+
+                {
+                let mut lock = state.lock().unwrap();
+
+                *lock = Some(q.clone());
+                
+                }
+                
+                //send the message
+
+            let msg = format!("** Random Trivia Time! ** \n **{}**", q.question);
+
+                let _ = channel_id.say(&http,msg).await;
+            }
+
+        }
+    }
+
+
+
 #[tokio::main] //this is here to tel the main function to be able to be ran by multiple users asycronioushljtrlt
 async fn main() -> Result<(), Error> {
 
@@ -256,7 +441,14 @@ async fn main() -> Result<(), Error> {
     
     //configuration options
     .options(poise::FrameworkOptions {
-        commands: vec![ping(), quote(), doctor(), episode(), points()], //register the ping command
+        commands: vec![ping(), quote(), doctor(), episode(), points(), ask()], //register the commands
+
+        event_handler: |ctx, event, framework, data| {
+
+            Box::pin(event_handler(ctx, event, framework, data))
+
+        },
+
         prefix_options: poise::PrefixFrameworkOptions{
             prefix: Some("!".into()), //prefix is !
             ..Default::default()
@@ -281,7 +473,26 @@ async fn main() -> Result<(), Error> {
 
             //load trivia from file
             let trivia_data = fs::read_to_string("trivia.json").unwrap_or("[]".to_string());
-            let trivia_questions: Vec<TriviaQuestions> = serde_json::from_str(&trivia_data).expect("Error parsin trivia.json file.");
+            let questions_vec: Vec<TriviaQuestions> = serde_json::from_str(&trivia_data).expect("Error parsin trivia.json file.");
+
+            //wrapping data in Arc for sharing
+            let trivia_questions = Arc::new(questions_vec);
+            let current_trivia = Arc::new(Mutex::new(None));
+
+
+            //spawning background task
+            //we clone the arc pointers to give the background task its own handle to see the data
+
+            let http_clone = _ctx.http.clone();
+            let questions_clone = trivia_questions.clone();
+            let state_clone = current_trivia.clone();
+
+            tokio::spawn(async move {
+
+                start_trivia_loop(http_clone, questions_clone, state_clone).await;
+
+            });
+
 
             println!("Loaded {} trivia questions", trivia_questions.len());
 
@@ -294,7 +505,7 @@ async fn main() -> Result<(), Error> {
                 quotes,
                 episodes,
                 trivia_questions,
-                current_trivia: Mutex::new(None),
+                current_trivia,
 
 
             })

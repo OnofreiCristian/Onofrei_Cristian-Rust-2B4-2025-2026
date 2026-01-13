@@ -1,9 +1,9 @@
+use std::sync::{Arc, Mutex};
 
 use sqlx::SqlitePool;
-use std::sync::Mutex; //Safe access across multiple threads
 
 
-use serde::{Deserialize,Serialize};
+use serde::{Deserialize};
 
 #[derive(Debug, Deserialize, Clone)]
 
@@ -44,9 +44,10 @@ pub struct Data{
 
     pub quotes: Vec<Quote>,
     pub episodes: Vec<Episode>,
-    pub trivia_questions: Vec<TriviaQuestions>,
 
-    pub current_trivia: Mutex<Option<TriviaQuestions>>,
+    pub trivia_questions: Arc<Vec<TriviaQuestions>>,
+
+    pub current_trivia: Arc<Mutex<Option<TriviaQuestions>>>,
 
 }
 
